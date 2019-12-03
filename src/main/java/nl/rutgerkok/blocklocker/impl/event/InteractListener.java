@@ -2,7 +2,12 @@ package nl.rutgerkok.blocklocker.impl.event;
 
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheLoader;
+import com.google.common.cache.LoadingCache;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Material;
@@ -48,8 +53,16 @@ public final class InteractListener extends EventListener {
     private static Set<BlockFace> AUTOPLACE_BLOCK_FACES = ImmutableSet.of(BlockFace.NORTH, BlockFace.EAST,
             BlockFace.SOUTH, BlockFace.WEST, BlockFace.UP);
 
+    public LoadingCache<Inventory, Boolean> imiecache;
+
     public InteractListener(BlockLockerPlugin plugin) {
         super(plugin);
+        imiecache = CacheBuilder.newBuilder().expireAfterWrite(30, TimeUnit.SECONDS).build(new CacheLoader<Inventory, Boolean>() {
+            @Override
+            public Boolean load(Inventory key) throws Exception {
+                return checkIMIE(key);
+            }
+        });
     }
 
     private boolean allowedByBlockPlaceEvent(Block placedBlock, BlockState replacedBlockState, Block placedAgainst,
@@ -250,21 +263,23 @@ public final class InteractListener extends EventListener {
 
     @EventHandler(ignoreCancelled = true)
     public void onInventoryMoveItemEvent(InventoryMoveItemEvent event) {
-        Block from = getInventoryBlockOrNull(event.getSource());
-        Block to = getInventoryBlockOrNull(event.getDestination());
-
-        if (from != null) {
-            if (isProtectedForRedstone(from)) {
+        try {
+            if (imiecache.get(event.getSource())) {
                 event.setCancelled(true);
                 return;
             }
-        }
-        if (to != null) {
-            if (isProtectedForRedstone(to)) {
+            if (imiecache.get(event.getDestination())) {
                 event.setCancelled(true);
                 return;
             }
+        } catch (ExecutionException e) {
+            event.setCancelled(true);
+            e.printStackTrace();
         }
+    }
+    private Boolean checkIMIE(Inventory inventory){
+        Block block = getInventoryBlockOrNull(inventory);
+        return block != null && isProtectedForRedstone(block);
     }
 
     /**
